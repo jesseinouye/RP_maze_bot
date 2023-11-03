@@ -161,3 +161,5 @@ cython_debug/
 
 data/
 saved_images/
+feature_test_images/
+target_test_images/

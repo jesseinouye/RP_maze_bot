@@ -70,7 +70,7 @@ class SLAM():
                  matchesMask = None, # draw only inliers
                  flags = 2)
 
-        img3 = cv2.drawMatches(img_now, kp1, img_prev,kp2, good ,None,**draw_params)
+        img3 = cv2.drawMatches(img_now, kp1, img_prev, kp2, good, None, **draw_params)
         cv2.imshow("image", img3)
         key = cv2.waitKey(2)
         

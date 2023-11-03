@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 
 from vis_nav_game import Player, Action
 
+from tqdm import tqdm
+
 from VisualSlam import SLAM
 from plot_path import visualize_paths
 
@@ -26,6 +28,7 @@ STEP_SIZE = 4
 class SuperOpt():
     def __init__(self):
         self.nms_radius = 4
+        # self.nms_radius = 2
         self.keypoint_threshold = 0.005
         self.max_keypoints = 80
 
@@ -73,6 +76,7 @@ class KeyboardPlayerPyGame(Player):
         self.super_keys = ['keypoints', 'scores', 'descriptors']
         self.img_data_list = []
         self.img_tensor_list = []
+        self.img_raw_list = []
 
         self.prev_img_tensor = None
 
@@ -82,7 +86,9 @@ class KeyboardPlayerPyGame(Player):
         # self.tick_turn_rad = 0.042454
         self.tick_turn_rad = 0.0426
 
-        self.orb = cv2.ORB.create(1000)
+        self.orb = cv2.ORB.create(80)
+        # self.sift = cv2.SIFT.create(80, nOctaveLayers=3, contrastThreshold=0.04, edgeThreshold=10, sigma=1.6, descriptorType=cv2.CV_32F)
+        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING)
 
         self.r = 0
         self.theta = 0
@@ -106,13 +112,69 @@ class KeyboardPlayerPyGame(Player):
             pygame.K_ESCAPE: Action.QUIT
         }
         
-    def pre_exploration(self) -> None:
+    def pre_exploration(self):
+        print("----------------------------------------------------")
+        print("Running pre_exploration")
         self.Cmat = self.get_camera_intrinsic_matrix()
         # print(self.Cmat)
         self.slam = SLAM(self.Cmat)
 
         # Save starting location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
+
+    
+    def pre_navigation(self):
+        print("----------------------------------------------------")
+        print("Running pre_navigation")
+        # ret = self.find_target_image()
+        
+
+    def find_target_image(self):
+        target_imgs = self.get_target_images()
+        if target_imgs is None or len(target_imgs) <= 0:
+            return False
+        
+        best_match = {}
+
+        for i, target in enumerate(target_imgs):
+            targ_gray = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
+            targ_tensor = frame2tensor(targ_gray, self.device)
+            targ_img_data = self.find_target_feature_points_superpoint(targ_tensor)
+
+            best_confidence = 0
+            conf_list = []
+
+            for j, img_data in enumerate(tqdm(self.img_data_list)):
+                img_tensor = self.img_tensor_list[j]
+                q1, q2, confidence = self.find_target_feature_matches_superglue(img1_dict=targ_img_data,
+                                                                                img1_tensor=targ_tensor,
+                                                                                img2_dict=img_data,
+                                                                                img2_tensor=img_tensor)
+                conf_accum = np.array(confidence).sum()
+                conf_list.append(conf_accum)
+
+                if conf_accum >= best_confidence:
+                    best_confidence = conf_accum
+                    best_match[i] = j
+
+            print("conf_list:\n{}".format(conf_list))
+
+
+        print("best_match: {}".format(best_match))
+        self.show_match(best_match[0])
+
+
+    # Display the matching image
+    def show_match(self, idx):
+        # img = self.img_tensor_list[idx]
+        img = self.img_raw_list[idx]
+        # print("IMG TYPE 1:\n{}".format(type(img)))
+        # img = img.numpy()
+        # print("IMG TYPE 2:\n{}".format(type(img)))
+        cv2.imshow('matched img', img)
+        cv2.waitKey(1)
+
+
        
     def act(self):
         for event in pygame.event.get():
@@ -158,7 +220,7 @@ class KeyboardPlayerPyGame(Player):
         cv2.putText(concat_img, 'Back View', (h_offset, int(w/2) + w_offset), font, size, color, stroke, line)
         cv2.putText(concat_img, 'Left View', (int(h/2) + h_offset, int(w/2) + w_offset), font, size, color, stroke, line)
         # data_dir = r"C:\Users\ifeda\ROB-GY-Computer-Vision\vis_nav_player"
-        visualize_paths(self.estimated_path, "Visual Odometry",file_out="VO.html")
+        # visualize_paths(self.estimated_path, "Visual Odometry",file_out="VO.html")
         
         cv2.imshow(f'KeyboardPlayer:target_images', concat_img)
         cv2.waitKey(1)
@@ -207,16 +269,27 @@ class KeyboardPlayerPyGame(Player):
         self.cur_pose[0,3] = self.cur_pose[0,3] + x
         self.cur_pose[2,3] = self.cur_pose[2,3] + y
 
-        # print("r: {}, theta: {}, x: {}, y: {}, posex: {}, posey: {}".format(self.r, self.theta, x, y, self.cur_pose[0,3], self.cur_pose[2,3]))
+        print("r: {}, theta: {}, x: {}, y: {}, posex: {}, posey: {}".format(self.r, self.theta, x, y, self.cur_pose[0,3], self.cur_pose[2,3]))
 
         # Save current location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
 
 
+    def find_target_feature_points_superpoint(self, img_tensor):
+        # img_tensor = frame2tensor(img, self.device)
+        img_data = self.matching.superpoint({'image': img_tensor})
+        return img_data
+    
+
     # Find feature points using SuperPoint
     def find_feature_points_superpoint(self, img):
         img_tensor = frame2tensor(img, self.device)
         img_data = self.matching.superpoint({'image': img_tensor})
+        print("img_data:\n{}".format(img_data))
+        print("sizes")
+        print("d: {}, k: {}, s: {}".format(img_data['descriptors'][0].size(),
+                                           img_data['keypoints'][0].size(),
+                                           img_data['scores'][0].size()))
 
         self.img_data_list.append(img_data)
         self.img_tensor_list.append(img_tensor)
@@ -226,16 +299,67 @@ class KeyboardPlayerPyGame(Player):
 
     # Find feature points using ORB
     def find_feature_points_orb(self, img):
-        pass
+        kps, desc = self.orb.detectAndCompute(img, None)
+        # kps, desc = self.sift.detectAndCompute(img, None)
+
+        kps = cv2.KeyPoint.convert(kps)
+        kps = torch.tensor(kps)
+        desc = torch.tensor(desc)
+
+        desc = desc / desc.max(1, keepdim=True)[0]
+        desc = torch.t(desc)
+
+        img_tensor = frame2tensor(img, self.device)
+
+        scores = torch.full((kps.size(dim=0),1), 0.5)
+        scores = torch.squeeze(scores)
+        # print("scores: {}".format(scores))
+
+        # img_data = {'keypoints':kps, 'descriptors':desc, 'image':img, 'scores':torch.tensor([])}
+        img_data = {'keypoints':[kps,], 'descriptors':[desc,], 'image':img, 'scores':(scores,)}
+        print("img_data:\n{}".format(img_data))
+
+        print("sizes")
+        print("d: {}, k: {}, s: {}".format(img_data['descriptors'][0].size(),
+                                           img_data['keypoints'][0].size(),
+                                           img_data['scores'][0].size()))
+
+        self.img_data_list.append(img_data)
+        self.img_tensor_list.append(img_tensor)
+
+        return kps, desc
 
 
     # Find feature matches using SuperGlue
-    def find_feature_matches_superglue(self, img1_index, img2_index):
-        img1_data = {k+'0':self.img_data_list[img1_index][k] for k in self.super_keys}
-        img1_data['image0'] = self.img_tensor_list[img1_index]
+    def find_feature_matches_superglue(self, img1_index=None, img2_index=None, img1_dict=None, img2_dict=None, img1_tensor=None, img2_tensor=None):
+        if img1_index is not None:
+            img1_data = {k+'0':self.img_data_list[img1_index][k] for k in self.super_keys}
+            img1_data['image0'] = self.img_tensor_list[img1_index]
+        else:
+            if img1_dict is not None:
+                img1_data = {k+'0':img1_dict[k] for k in self.super_keys}
+                if img1_tensor is not None:
+                    img1_data['image0'] = img1_tensor
+            else:
+                return False
+            
+        if img2_index is not None:
+            img2_data = {k+'1':self.img_data_list[img2_index][k] for k in self.super_keys}
+            img2_data['image1'] = self.img_tensor_list[img2_index]
+        else:
+            if img2_dict is not None:
+                img2_data = {k+'1':img2_dict[k] for k in self.super_keys}
+                if img2_tensor is not None:
+                    img2_data['image1'] = img2_tensor
+            else:
+                return False
 
-        img2_data = {k+'1': self.img_data_list[img2_index][k] for k in self.super_keys}
-        img2_data['image1'] = self.img_tensor_list[img2_index]
+
+        # img1_data = {k+'0':self.img_data_list[img1_index][k] for k in self.super_keys}
+        # img1_data['image0'] = self.img_tensor_list[img1_index]
+
+        # img2_data = {k+'1': self.img_data_list[img2_index][k] for k in self.super_keys}
+        # img2_data['image1'] = self.img_tensor_list[img2_index]
 
         pred = self.matching({**img1_data, **img2_data})
         kpts0 = img1_data['keypoints0'][0].cpu().numpy()
@@ -253,6 +377,65 @@ class KeyboardPlayerPyGame(Player):
 
         return q1, q2
 
+
+    # Find feature matches using SuperGlue
+    def find_target_feature_matches_superglue(self, img1_index=None, img2_index=None, img1_dict=None, img2_dict=None, img1_tensor=None, img2_tensor=None):
+        if img1_index is not None:
+            img1_data = {k+'0':self.img_data_list[img1_index][k] for k in self.super_keys}
+            img1_data['image0'] = self.img_tensor_list[img1_index]
+        else:
+            if img1_dict is not None:
+                img1_data = {k+'0':img1_dict[k] for k in self.super_keys}
+                if img1_tensor is not None:
+                    img1_data['image0'] = img1_tensor
+            else:
+                return False
+            
+        if img2_index is not None:
+            img2_data = {k+'1':self.img_data_list[img2_index][k] for k in self.super_keys}
+            img2_data['image1'] = self.img_tensor_list[img2_index]
+        else:
+            if img2_dict is not None:
+                img2_data = {k+'1':img2_dict[k] for k in self.super_keys}
+                if img2_tensor is not None:
+                    img2_data['image1'] = img2_tensor
+            else:
+                return False
+
+        pred = self.matching({**img1_data, **img2_data})
+        kpts0 = img1_data['keypoints0'][0].cpu().numpy()
+        kpts1 = img2_data['keypoints1'][0].cpu().numpy()
+        matches = pred['matches0'][0].cpu().numpy()
+        confidence = pred['matching_scores0'][0].cpu().detach().numpy()
+
+        valid = matches > -1
+        mkpts0 = kpts0[valid]
+        mkpts1 = kpts1[matches[valid]]
+
+        # Get matching points (q1 for img1, q2 for img2)
+        q1 = np.array(mkpts0)
+        q2 = np.array(mkpts1)
+
+        return q1, q2, confidence
+
+
+    def find_feature_matches_knn(self, kp1, desc1, kp2, desc2):
+        # Find matches
+        matches = self.bf.knnMatch(desc1, desc2, k=2)
+
+        # Find the matches there do not have a to high distance
+        good = []
+        try:
+            for m, n in matches:
+                if m.distance < 0.9 * n.distance:
+                    good.append(m)
+        except ValueError:
+            pass
+
+        # Get the image points form the good matches
+        q1 = np.float32([kp1[m.queryIdx] for m in good])
+        q2 = np.float32([kp2[m.trainIdx] for m in good])
+        return q1, q2
 
     # Find pose
     def find_pose(self, q1, q2):
@@ -294,17 +477,48 @@ class KeyboardPlayerPyGame(Player):
             fpv_gray = cv2.cvtColor(fpv, cv2.COLOR_BGR2GRAY)
             
             # Find feature points
-            keypts, desc = self.find_feature_points_superpoint(fpv_gray)
+            # keypts, desc = self.find_feature_points_superpoint(fpv_gray)
+            keypts, desc = self.find_feature_points_orb(fpv_gray)
+
 
             # If more than one image processed (index >= 1)
             if self.img_idx >= 1:
 
                 # Find feature matches between prev processed image and current image
                 q1, q2 = self.find_feature_matches_superglue(self.img_idx-1, self.img_idx)
+                # q1, q2 = self.find_feature_matches_knn(self.img_data_list[self.img_idx-1]['keypoints'], 
+                #                                        self.img_data_list[self.img_idx-1]['descriptors'], 
+                #                                        keypts, 
+                #                                        desc)
 
                 pose = self.find_pose(q1, q2)
 
             # Increment index of processed images
+            self.img_idx += 1
+
+        return True
+    
+
+    # Process image to get keypoints only
+    def process_image_simple(self, fpv):
+        state = self.get_state()
+        if state is None:
+            return None
+        
+        step = state[2]
+
+        # If past starting step (to avoid static) and on a set interval (self.step_size)
+        if (step > self.starting_step) and ((step % self.step_size) == 0):
+            fpv_gray = cv2.cvtColor(fpv, cv2.COLOR_BGR2GRAY)
+            
+            # Find feature points
+            keypts, desc = self.find_feature_points_superpoint(fpv_gray)
+            # keypts, desc = self.find_feature_points_orb(fpv_gray)
+            self.img_raw_list.append(fpv)
+
+            filename = os.path.join("target_test_images", f"image{self.img_idx}.png")
+            cv2.imwrite(filename, fpv)
+
             self.img_idx += 1
 
         return True
@@ -323,10 +537,11 @@ class KeyboardPlayerPyGame(Player):
             self.screen = pygame.display.set_mode((w, h))
        
         # Find pose via dead reckoning
-        # self.find_pose_dead_reck()
+        self.find_pose_dead_reck()
 
         # Process image: find feature points, match feature points, get pose
-        # ret = self.process_image(fpv)
+        ret = self.process_image(fpv)
+        # ret = self.process_image_simple(fpv)
 
 
         # ************************************
@@ -336,7 +551,7 @@ class KeyboardPlayerPyGame(Player):
         # SuperGlue implementation
         # -----------------------------------------------------
         # BEGIN IF 0
-        if 1:
+        if 0:
             # Interval for capturing / processing images
             STEPSIZE = 4
 

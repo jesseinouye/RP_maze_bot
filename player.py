@@ -10,8 +10,10 @@ import matplotlib.pyplot as plt
 
 from vis_nav_game import Player, Action
 
+from tqdm import tqdm
+
 from VisualSlam import SLAM
-from plot_path import visualize_paths
+from plot_path import visualize_paths, visualize_paths_with_target
 
 from SuperGluePretrainedNetwork.models.matching import Matching
 from SuperGluePretrainedNetwork.models.utils import frame2tensor, make_matching_plot_fast
@@ -113,6 +115,44 @@ class KeyboardPlayerPyGame(Player):
 
         # Save starting location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
+
+    def pre_navigation(self):
+        self.find_target()
+
+    def find_target(self):
+        target_list = self.get_target_images()
+        if target_list is None or len(target_list) <= 0:
+            return
+        
+        best_match_list = [None, None, None, None]
+
+        print("Finding target image matches")
+
+        for i, target in enumerate(target_list):
+            num_good = 0
+            for j, img_data in enumerate(tqdm(self.img_data_list)):
+                target_kp, target_des = self.slam.find_feature_points_singe_img(target)
+                img_kp, img_des = img_data['keypoints'], img_data['descriptors']
+                _, _, good = self.slam.get_matches(target_kp, img_kp, target_des, img_des)
+
+                if len(good) > num_good:
+                    num_good = len(good)
+                    best_match_list[i] = j
+
+        self.show_best_match(best_match_list[0])
+
+        print("best match: {}".format(best_match_list[0]))
+        possible_targets = [self.estimated_path[idx] for idx in best_match_list]
+        print("target loc:  {}".format(possible_targets))
+
+        visualize_paths_with_target(self.estimated_path, possible_targets, "Visual Odometry",file_out="VO.html")
+
+    def show_best_match(self, idx):
+        img = self.img_data_list[idx]['image']
+
+        cv2.imshow('best match', img)
+        cv2.waitKey(0)
+
        
     def act(self):
         for event in pygame.event.get():
@@ -158,7 +198,7 @@ class KeyboardPlayerPyGame(Player):
         cv2.putText(concat_img, 'Back View', (h_offset, int(w/2) + w_offset), font, size, color, stroke, line)
         cv2.putText(concat_img, 'Left View', (int(h/2) + h_offset, int(w/2) + w_offset), font, size, color, stroke, line)
         # data_dir = r"C:\Users\ifeda\ROB-GY-Computer-Vision\vis_nav_player"
-        visualize_paths(self.estimated_path, "Visual Odometry",file_out="VO.html")
+        # visualize_paths(self.estimated_path, "Visual Odometry",file_out="VO.html")
         
         cv2.imshow(f'KeyboardPlayer:target_images', concat_img)
         cv2.waitKey(1)
@@ -359,23 +399,34 @@ class KeyboardPlayerPyGame(Player):
         # If past starting step (to avoid static) and on a set interval (self.step_size)
         if (step > self.starting_step) and ((step % self.step_size) == 0):
             # fpv_gray = cv2.cvtColor(fpv, cv2.COLOR_BGR2GRAY)
-            self.img_data_list.append(fpv)
+            self.img_data_list.append({'image':fpv})
+            kp, des = self.slam.find_feature_points_singe_img(fpv)
+            self.img_data_list[self.img_idx]['keypoints'] = kp
+            self.img_data_list[self.img_idx]['descriptors'] = des
             
             # If more than one image processed (index >= 1)
             if self.img_idx >= 1:
 
                 # Find feature matches between prev processed image and current image
                 # Find feature points
-                img_now = self.img_data_list[self.img_idx]
-                img_prev = self.img_data_list[self.img_idx-1]
-                kp1,kp2,des1,des2 = self.slam.find_feature_points(img_now,img_prev)
-                q1,q2,good = self.slam.get_matches(kp1,kp2,des1,des2)
+                img_now = self.img_data_list[self.img_idx]['image']
+                img_prev = self.img_data_list[self.img_idx-1]['image']
+                # kp1,kp2,des1,des2 = self.slam.find_feature_points(img_now,img_prev)
+                # kp1, des1 = self.slam.find_feature_points_singe_img(img_)
+                # self.img_data_list[self.img_idx]['keypoints'] = kp2
+                # self.img_data_list[self.img_idx]['descriptors'] = des2
+                # q1,q2,good = self.slam.get_matches(kp1,kp2,des1,des2)
+                kp_prev = self.img_data_list[self.img_idx-1]['keypoints']
+                des_prev = self.img_data_list[self.img_idx-1]['descriptors']
+                # q1, q2, good = self.slam.get_matches(kp_prev, kp, des_prev, des)
+                q1, q2, good = self.slam.get_matches(kp, kp_prev, des, des_prev)
                 draw_params = dict(matchColor = -1, # draw matches in green color
                  singlePointColor = None,
                  matchesMask = None, # draw only inliers
                  flags = 2)
 
-                img3 = cv2.drawMatches(img_now, kp1, img_prev,kp2, good ,None,**draw_params)
+                # img3 = cv2.drawMatches(img_now, kp1, img_prev,kp2, good ,None,**draw_params)
+                img3 = cv2.drawMatches(img_now, kp, img_prev, kp_prev, good, None, **draw_params)
                 cv2.imshow("image", img3)
                 key = cv2.waitKey(2)
         

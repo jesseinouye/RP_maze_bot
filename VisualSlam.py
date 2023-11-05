@@ -6,7 +6,7 @@ from tqdm import tqdm
 class SLAM():
     def __init__(self,Cmat):        
         # self.images = self._load_images(image_dir)
-        self.orb = cv2.ORB_create(3000)
+        self.orb = cv2.ORB.create(3000)
         FLANN_INDEX_LSH = 6
         index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
         search_params = dict(checks=50)
@@ -42,6 +42,10 @@ class SLAM():
         kp1, des1 = self.orb.detectAndCompute(img_prev, None)
         kp2, des2 = self.orb.detectAndCompute(img_now, None)
         return kp1,kp2,des1,des2
+    
+    def find_feature_points_singe_img(self, img):
+        kp, des = self.orb.detectAndCompute(img, None)
+        return kp, des
         
     
     def get_matches(self, kp1,kp2,des1,des2):

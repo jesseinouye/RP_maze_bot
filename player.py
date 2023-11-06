@@ -99,6 +99,10 @@ class KeyboardPlayerPyGame(Player):
 
         self.action_list = []
 
+        self.last_act_set = Action.IDLE
+
+        self.prev_transform = np.eye(4)
+
 
     def reset(self):
         self.fpv = None
@@ -284,20 +288,23 @@ class KeyboardPlayerPyGame(Player):
     def find_pose(self, q1, q2):
         # Get pose from SLAM class
         relative_pose  = self.slam.get_pose(q1, q2)
-        if self.last_act == Action.FORWARD or self.last_act == Action.BACKWARD:
+        if Action.LEFT not in self.last_act_set and Action.RIGHT not in self.last_act_set:
             # relative_pose[:,:3] = 1
             relative_pose[:3,:3] = np.eye(3)
-            pass
-        elif self.last_act == Action.LEFT or self.last_act == Action.RIGHT:
+        elif Action.FORWARD not in self.last_act_set and Action.BACKWARD not in self.last_act_set:
             relative_pose[:,3] = [0,0,0,1]
         elif self.last_act == Action.IDLE:
             relative_pose[:,:] = np.eye(4)
-            
+
         relative_pose = np.nan_to_num(relative_pose, neginf=0, posinf=0)
           
         # Save last x,z coordinates
         prev_xz = (self.cur_pose[0,3], self.cur_pose[2,3])
         prev_rot = self.cur_pose[:3,:3]
+
+
+        if relative_pose[0,0] <= 0.9 and relative_pose[2,2] <= 0.9:
+            relative_pose[:3,:3] = self.prev_transform[:3,:3]
 
         # Calculate new pose from relative pose (transformation matrix)
         self.cur_pose = np.matmul(self.cur_pose, np.linalg.inv(relative_pose))
@@ -328,13 +335,14 @@ class KeyboardPlayerPyGame(Player):
         # If not moving forward or backward, ignore the translation vector
         # Translation vector seems to be normalized to 1 from decomposeEssentialMat()
         # See: https://answers.opencv.org/question/66839/units-of-rotation-and-translation-from-essential-matrix/
-        if (self.last_act != Action.FORWARD) and (self.last_act != Action.BACKWARD):
+        if (Action.FORWARD not in self.last_act_set) and (Action.BACKWARD not in self.last_act_set):
             self.cur_pose[0,3] = prev_xz[0]
             self.cur_pose[2,3] = prev_xz[1]
-        if (self.last_act != Action.LEFT) and (self.last_act != Action.RIGHT):
+        if (Action.LEFT not in self.last_act_set) and (Action.RIGHT not in self.last_act_set):
             self.cur_pose[:3,:3] = prev_rot
-        
-        print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
+
+        print(relative_pose)
+        print("pre:  {} {} {} {}".format(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1]))
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
@@ -355,11 +363,13 @@ class KeyboardPlayerPyGame(Player):
         # If the difference on the y-axis is greater or equal, only update the y-axis position
             self.cur_pose[0, 3] = prev_xz[0]
             
-            
+        print("post: {} {} {} {}".format(self.cur_pose[0,3], self.cur_pose[2,3], x_diff, y_diff))
         # Save current location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
         # print(self.estimate)
-        self.action_list.append(self.last_act)
+        self.action_list.append(self.last_act_set)
+
+        self.prev_transform = relative_pose
 
         return self.cur_pose
 
@@ -413,12 +423,12 @@ class KeyboardPlayerPyGame(Player):
     def process_image_orb(self, fpv):
         state = self.get_state()
         if state is None:
-            return None
+            return False
         
         step = state[2]
 
-        if self.last_act == Action.IDLE:
-            return True
+        if self.last_act_set == Action.IDLE:
+            return False
         
         
         # If past starting step (to avoid static) and on a set interval (self.step_size)
@@ -452,11 +462,20 @@ class KeyboardPlayerPyGame(Player):
                 if key & 0xFF == ord('q'):
                     cv2.destroyAllWindows()  # Close the OpenCV window
                 
-                if(len(q1)>=5):
+                if(len(q1)>=8):
                     pose = self.find_pose(q1, q2)
 
             # Increment index of processed images
             self.img_idx += 1
+
+            self.last_act_set = Action.IDLE
+        else:
+            return False
+
+
+        # if step == 144:
+        #     cv2.imshow('144', fpv)
+        #     cv2.waitKey(0)
 
         return True
 
@@ -480,6 +499,10 @@ class KeyboardPlayerPyGame(Player):
         # ret = self.process_image_super_glue(fpv)
         
         ret = self.process_image_orb(fpv)
+
+        # If image wasn't processed, add last action to set
+        if not ret:
+            self.last_act_set |= self.last_act
         
     
 

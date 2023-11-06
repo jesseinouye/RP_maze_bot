@@ -5,6 +5,7 @@ import time
 import math
 import numpy as np
 import torch
+import logging
 
 import matplotlib.pyplot as plt
 
@@ -21,7 +22,7 @@ from SuperGluePretrainedNetwork.models.utils import frame2tensor, make_matching_
 START_STEP = 5
 STEP_SIZE = 3
 
-
+logging.basicConfig(filename='vis_nav_player.log', filemode='w', level=logging.INFO)
 
 
 # SuperPoint / SuperGlue options

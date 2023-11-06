@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 
 from vis_nav_game import Player, Action
 
+from test_inputs import test_inputs
+
 from VisualSlam import SLAM
 from plot_path import visualize_paths
 
@@ -17,7 +19,7 @@ from SuperGluePretrainedNetwork.models.matching import Matching
 from SuperGluePretrainedNetwork.models.utils import frame2tensor, make_matching_plot_fast
 
 START_STEP = 5
-STEP_SIZE = 1
+STEP_SIZE = 3
 
 
 
@@ -91,6 +93,11 @@ class KeyboardPlayerPyGame(Player):
 
         self.prev_reck_act = None
 
+        self.test_input_idx = 0
+        self.test_action_idx = 0
+
+        self.action_list = []
+
 
     def reset(self):
         self.fpv = None
@@ -123,14 +130,32 @@ class KeyboardPlayerPyGame(Player):
                 self.last_act = Action.QUIT
                 return Action.QUIT
 
-            if event.type == pygame.KEYDOWN:
-                if event.key in self.keymap:
-                    self.last_act |= self.keymap[event.key]
-                else:
-                    self.show_target_images()
-            if event.type == pygame.KEYUP:
-                if event.key in self.keymap:
-                    self.last_act ^= self.keymap[event.key]
+            # if event.type == pygame.KEYDOWN:
+            #     if event.key in self.keymap:
+            #         self.last_act |= self.keymap[event.key]
+            #     else:
+            #         self.show_target_images()
+            # if event.type == pygame.KEYUP:
+            #     if event.key in self.keymap:
+            #         self.last_act ^= self.keymap[event.key]
+
+
+
+
+        if self.test_input_idx >= len(test_inputs):
+            return Action.IDLE
+            
+        test_step = test_inputs[self.test_input_idx]
+
+        self.last_act = Action.IDLE
+
+        self.last_act |= test_step['actions']
+
+        self.test_action_idx += 1
+        if (self.test_action_idx >= test_step['steps']):
+            self.test_action_idx = 0
+            self.test_input_idx += 1
+        
         return self.last_act
 
     def show_target_images(self):
@@ -333,6 +358,7 @@ class KeyboardPlayerPyGame(Player):
         # Save current location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
         # print(self.estimate)
+        self.action_list.append(self.last_act)
 
         return self.cur_pose
 
@@ -389,6 +415,7 @@ class KeyboardPlayerPyGame(Player):
             return None
         
         step = state[2]
+        print("see step: {}".format(step))
 
         if self.last_act == Action.IDLE:
             return True

@@ -342,8 +342,8 @@ class KeyboardPlayerPyGame(Player):
         if (Action.LEFT not in self.last_act_set) and (Action.RIGHT not in self.last_act_set):
             self.cur_pose[:3,:3] = prev_rot
 
-        print(relative_pose)
-        print("pre:  {} {} {} {}".format(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1]))
+        # print(relative_pose)
+        # print("pre:  {} {} {} {}".format(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1]))
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
         print(self.cur_pose[0,3],self.cur_pose[2,3],self.cur_pose[0,3]-prev_xz[0],self.cur_pose[2,3]-prev_xz[1])
@@ -364,7 +364,7 @@ class KeyboardPlayerPyGame(Player):
         # If the difference on the y-axis is greater or equal, only update the y-axis position
             self.cur_pose[0, 3] = prev_xz[0]
             
-        print("post: {} {} {} {}".format(self.cur_pose[0,3], self.cur_pose[2,3], x_diff, y_diff))
+        # print("post: {} {} {} {}".format(self.cur_pose[0,3], self.cur_pose[2,3], x_diff, y_diff))
         # Save current location
         self.estimated_path.append((self.cur_pose[0,3], self.cur_pose[2,3]))
         # print(self.estimate)

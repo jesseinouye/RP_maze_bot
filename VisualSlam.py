@@ -1,5 +1,7 @@
 import cv2
 import os
+import datetime
+import math
 import numpy as np
 from tqdm import tqdm
 
@@ -11,6 +13,7 @@ class SLAM():
         index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
         search_params = dict(checks=50)
         self.flann = cv2.FlannBasedMatcher(indexParams=index_params, searchParams=search_params)
+        # self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         self.K = Cmat
         self.first_process =  True
         # print("K: {}".format(self.K))
@@ -65,13 +68,23 @@ class SLAM():
 
         # Find matches
         matches = self.flann.knnMatch(des1, des2, k=2)
+        # matches = self.bf.match(des1, des2)
 
         # Find the matches there do not have a to high distance
         good = []
+
+        dist_threshold = 60
         try:
             for m, n in matches:
-                if m.distance < 0.9 * n.distance:
-                    good.append(m)
+                # print("m:\n{}\nn:\n{}".format(m, n))
+                x1, y1 = kp1[m.queryIdx].pt[0], kp1[m.queryIdx].pt[1]
+                x2, y2 = kp2[m.trainIdx].pt[0], kp2[m.trainIdx].pt[1]
+
+                dist = math.sqrt(((x1 - x2)**2) + ((y1 - y2)**2))
+
+                if dist <= dist_threshold:
+                    if m.distance < 0.8 * n.distance:
+                        good.append(m)
         except ValueError:
             pass
 
@@ -107,16 +120,27 @@ class SLAM():
         transformation_matrix (ndarray): The transformation matrix
         """
         # Essential matrix
+        time_start = datetime.datetime.now()
         E, _ = cv2.findEssentialMat(q1, q2, self.K, threshold=1)      # Adjust the threshold
+        time_emat = datetime.datetime.now()
+        time_diff = time_emat - time_start
+        # print("Time taken (essentialMat): {}".format(time_diff))
+
         _, R, t, masks = cv2.recoverPose(E, q1, q2, self.K)
+        time_recpose = datetime.datetime.now()
+        time_diff = time_recpose - time_emat
+        # print("Time taken (recoverPose): {}".format(time_diff))
         # Decompose the Essential matrix into R and t
-        if self.first_process == True:
-            self.P = np.column_stack((self.K, np.zeros((3, 1))))
-            self.first_process = False
+        # if self.first_process == True:
+        #     self.P = np.column_stack((self.K, np.zeros((3, 1))))
+        #     self.first_process = False
         # print("P: {}".format(self.P))
 
         # Get transformation matrix
         transformation_matrix = self._form_transf(R, np.squeeze(t))
+        time_formtransf = datetime.datetime.now()
+        time_diff = time_formtransf - time_recpose
+        # print("Time taken (form_transf): {}".format(time_diff))
         return transformation_matrix
     
    

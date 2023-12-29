@@ -28,7 +28,8 @@ from sklearn.neighbors import BallTree
 START_STEP = 5
 STEP_SIZE = 3
 
-logging.basicConfig(filename='vis_nav_player.log', filemode='w', level=logging.DEBUG)
+logging.basicConfig(filename='vis_nav_player.log', filemode='w', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s: %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 
 
 # SuperPoint / SuperGlue options
